@@ -190,10 +190,10 @@ export default function ModernLoginSignup({ initialMode }: ModernLoginSignupProp
   // ─── Supabase Authentication Handlers ───
   const getURL = () => {
     let url =
-      process.env.NEXT_PUBLIC_SITE_URL ??
-      process.env.NEXT_PUBLIC_VERCEL_URL ??
-      'http://localhost:3000/';
-    url = url.startsWith('http') ? url : `https://${url}`;
+      typeof window !== 'undefined' && window.location.origin
+        ? window.location.origin
+        : process.env.NEXT_PUBLIC_SITE_URL ??
+          (process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : 'http://localhost:3000');
     url = url.endsWith('/') ? url : `${url}/`;
     return `${url}auth/callback`;
   };
