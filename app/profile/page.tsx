@@ -68,14 +68,14 @@ export default function ProfilePage() {
           setEmail(user.email || "");
           const meta = user.user_metadata || {};
           setFullName(meta.full_name || meta.name || "");
-          setTargetRole(meta.target_role || "Full Stack Developer");
-          setLocation(meta.location || "Uttar Pradesh, India");
-          setPhone(meta.phone || "+91 6396789234");
-          setSummary(meta.summary || "Product-minded Software Engineer focused on high-scale web platforms and RAG applications.");
-          setLinkedin(meta.linkedin || "linkedin.com/in/develo-oper-piyush");
-          setGithub(meta.github || "github.com/develo-oper-piyush");
-          setLeetcode(meta.leetcode || "leetcode.com/develo_oper_piyush");
-          setPortfolio(meta.portfolio || "piyushchaudhary.vercel.app");
+          setTargetRole(meta.target_role || "");
+          setLocation(meta.location || "");
+          setPhone(meta.phone || "");
+          setSummary(meta.summary || "");
+          setLinkedin(meta.linkedin || "");
+          setGithub(meta.github || "");
+          setLeetcode(meta.leetcode || "");
+          setPortfolio(meta.portfolio || "");
         }
       } catch (err) {
         console.warn("Could not load user profile:", err);

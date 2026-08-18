@@ -1,62 +1,16 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Groq from 'groq-sdk';
-
-// Robust JSON extractor: handles <think> reasoning tags, unclosed tags, markdown fences, and brace counting
-function extractFirstJSON(raw: string): string {
-  // 1. Strip <think>...</think> if present
-  let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '');
-  // If there's an unclosed <think> tag, strip up to the first '{'
-  if (text.includes('<think>')) {
-    const endThinkIdx = text.lastIndexOf('</think>');
-    if (endThinkIdx !== -1) {
-      text = text.substring(endThinkIdx + 8);
-    } else {
-      const jsonStart = text.indexOf('{');
-      if (jsonStart !== -1) {
-        text = text.substring(jsonStart);
-      }
-    }
-  }
-
-  // 2. Strip markdown code fences ```json ... ```
-  text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-
-  // 3. Find first '{'
-  const start = text.indexOf('{');
-  if (start === -1) throw new Error('No JSON object found in response');
-
-  // 4. Find matching closing '}' with brace counting
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  let end = -1;
-
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (escape) { escape = false; continue; }
-    if (ch === '\\' && inString) { escape = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === '{') depth++;
-    if (ch === '}') {
-      depth--;
-      if (depth === 0) {
-        end = i;
-        break;
-      }
-    }
-  }
-
-  if (end !== -1) {
-    return text.substring(start, end + 1);
-  }
-
-  return text.substring(start);
-}
+import { repairAndParseJSON } from './rag-chain';
 
 async function callGroqAPI(prompt: string, groqKey: string): Promise<string> {
   const groq = new Groq({ apiKey: groqKey });
-  const models = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.6-27b'];
+  const models = [
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
+    'qwen/qwen3.6-27b',
+    'groq/compound',
+    'groq/compound-mini',
+  ];
   let lastErr: any = null;
   for (const m of models) {
     try {
@@ -68,7 +22,7 @@ async function callGroqAPI(prompt: string, groqKey: string): Promise<string> {
       return response.choices[0]?.message?.content || '';
     } catch (err: any) {
       lastErr = err;
-      console.warn(`Groq model '${m}' failed, trying next model...`);
+      console.warn(`Groq model '${m}' failed (${err?.message || err}). Trying next model...`);
     }
   }
   throw lastErr;
@@ -136,12 +90,18 @@ ${resumeText.slice(0, 7000)}
       rawResponseText = await callGroqAPI(prompt, groqKey!);
     } else if (hasValidGemini) {
       const genAI = new GoogleGenerativeAI(geminiKey!);
-      const candidateModels = ['gemini-flash-latest', 'gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+      const candidateModels = ['gemini-3.6-flash', 'gemini-3.6-pro', 'gemini-3.5-flash', 'gemini-2.5-flash'];
       let lastError: any = null;
 
       for (const modelName of candidateModels) {
         try {
-          const model = genAI.getGenerativeModel({ model: modelName });
+          const model = genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: {
+              maxOutputTokens: 8192,
+              responseMimeType: 'application/json',
+            },
+          });
           const result = await model.generateContent(prompt);
           rawResponseText = result.response.text();
           lastError = null;
@@ -193,8 +153,7 @@ function parseAndCleanAnalysisJSON(
   targetRole: string
 ): ResumeAnalysisResult {
   try {
-    const cleanedText = extractFirstJSON(rawText);
-    const parsed = JSON.parse(cleanedText);
+    const parsed = repairAndParseJSON(rawText);
     
     // Filter findings to guarantee no empty/positive findings slipped through
     const validFindings = (parsed.missingFindings || []).filter((f: any) => {

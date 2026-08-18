@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Sparkles, ArrowLeft, Send, Download, Layout, FileType, RefreshCw, Eye, Edit3, Check, Loader2, Plus, Trash2, Wand2, Code, Palette } from "lucide-react";
-import { UserContextProfile } from "@/lib/ai/rag-chain";
+import { UserContextProfile, extractIdentityFromResumeText } from "@/lib/ai/rag-chain";
 import { ModernMinimalTemplate, TechDeveloperTemplate, InteractivePortfolioTemplate, LatexResumeTemplate } from "@/components/ui/resume-templates";
 import { Button } from "@/components/ui/stateful-button";
 import { SkeletonText } from "@/components/ui/skeleton";
@@ -43,26 +43,76 @@ export default function BuilderWorkspacePage() {
   const [isExporting, setIsExporting] = useState(false);
   const [activeTab, setActiveTab] = useState<"chat" | "form">("form");
 
-  // ─── Fetch authenticated user data on mount ───
+
+
+  // ─── Fetch authenticated user data & uploaded resume context on mount ───
   useEffect(() => {
-    const fetchUserData = async () => {
+    const fetchWorkspaceData = async () => {
+      let authName = "";
+      let authEmail = "";
+
       try {
         const supabase = createClient();
-        if (!supabase) return;
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
+        if (supabase) {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            authName = user.user_metadata?.full_name || user.user_metadata?.name || "";
+            authEmail = user.email || "";
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch auth user:", err);
+      }
+
+      try {
+        const res = await fetch("/api/resumes");
+        const json = await res.json();
+        const routeId = params?.id as string;
+
+        // 1. If opening an existing generated resume
+        const matchingGen = json.generatedResumes?.find((r: any) => r.id === routeId);
+        if (matchingGen?.contentJson) {
+          if (matchingGen.templateId) setTemplateId(matchingGen.templateId);
+          setProfile({
+            ...matchingGen.contentJson,
+            name: matchingGen.contentJson.name || authName,
+            email: matchingGen.contentJson.email || authEmail,
+          });
+          return;
+        }
+
+        // 2. Otherwise find uploaded resume context
+        const matchingUpload = json.uploadedResumes?.find((r: any) => r.id === routeId) || json.uploadedResumes?.[0];
+        if (matchingUpload) {
+          const parsedText = matchingUpload.parsedText || "";
+          const extracted = extractIdentityFromResumeText(parsedText);
+
           setProfile((prev) => ({
             ...prev,
-            name: prev.name || user.user_metadata?.full_name || user.user_metadata?.name || "",
-            email: prev.email || user.email || "",
+            uploadedResumeText: parsedText,
+            name: prev.name || extracted.name || authName || "",
+            email: prev.email || extracted.email || authEmail || "",
+            phone: prev.phone || extracted.phone || "",
+            location: prev.location || extracted.location || "",
+            targetRole: prev.targetRole || matchingUpload.targetRole || "",
+          }));
+        } else {
+          setProfile((prev) => ({
+            ...prev,
+            name: prev.name || authName,
+            email: prev.email || authEmail,
           }));
         }
       } catch (err) {
-        console.warn("Could not fetch user data:", err);
+        console.warn("Could not fetch resumes data:", err);
+        if (authName || authEmail) {
+          setProfile((prev) => ({ ...prev, name: prev.name || authName, email: prev.email || authEmail }));
+        }
       }
     };
-    fetchUserData();
-  }, []);
+
+    fetchWorkspaceData();
+  }, [params?.id]);
 
   // ─── Handle inline field edits from contentEditable ───
   const handleFieldChange = useCallback((path: string, value: any) => {
@@ -596,7 +646,7 @@ export default function BuilderWorkspacePage() {
         </div>
 
         {/* Right Pane: Live Rendered Resume/Portfolio Preview (7 cols) */}
-        <div className="lg:col-span-7 p-4 overflow-y-auto h-[calc(100vh-53px)] bg-slate-900/30">
+        <div className="lg:col-span-7 p-4 overflow-y-auto h-[calc(100vh-53px)] bg-slate-900/30 scroll-smooth">
           <div className="mb-3 flex items-center justify-between">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
               <Eye className="h-3.5 w-3.5 text-cyan-400" /> Live Preview

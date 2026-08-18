@@ -1,11 +1,56 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Groq from 'groq-sdk';
 
-// Robust JSON extractor: handles <think> reasoning tags, unclosed tags, markdown fences, and brace counting
-function extractFirstJSON(raw: string): string {
+// Robust JSON repair helper for truncated LLM responses
+function fixTruncatedJSON(jsonStr: string): string {
+  let str = jsonStr.trim();
+  let inString = false;
+  let escape = false;
+  const stack: string[] = [];
+
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+
+    if (ch === '{') stack.push('}');
+    else if (ch === '[') stack.push(']');
+    else if (ch === '}' || ch === ']') {
+      if (stack.length > 0 && stack[stack.length - 1] === ch) {
+        stack.pop();
+      }
+    }
+  }
+
+  if (inString) {
+    str += '"';
+  }
+
+  str = str.replace(/,\s*$/, '');
+
+  while (stack.length > 0) {
+    const closing = stack.pop();
+    str += closing;
+  }
+
+  return str;
+}
+
+// Robust JSON extractor: handles <think> reasoning tags, unclosed tags, markdown fences, control chars, and brace counting
+export function repairAndParseJSON(raw: string): any {
   // 1. Strip <think>...</think> if present
   let text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '');
-  // If there's an unclosed <think> tag, strip up to the first '{'
   if (text.includes('<think>')) {
     const endThinkIdx = text.lastIndexOf('</think>');
     if (endThinkIdx !== -1) {
@@ -25,38 +70,40 @@ function extractFirstJSON(raw: string): string {
   const start = text.indexOf('{');
   if (start === -1) throw new Error('No JSON object found in response');
 
-  // 4. Find matching closing '}' with brace counting
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  let end = -1;
+  // Extract from first '{'
+  let jsonSub = text.substring(start);
 
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (escape) { escape = false; continue; }
-    if (ch === '\\' && inString) { escape = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === '{') depth++;
-    if (ch === '}') {
-      depth--;
-      if (depth === 0) {
-        end = i;
-        break;
-      }
+  // 4. Try standard JSON.parse
+  try {
+    return JSON.parse(jsonSub);
+  } catch {
+    // Attempt 1: Fix control chars & unescaped newlines inside strings
+    const sanitized = jsonSub.replace(/[\u0000-\u001F]+/g, (match) => {
+      if (match.includes('\n')) return '\\n';
+      if (match.includes('\r')) return '\\r';
+      if (match.includes('\t')) return '\\t';
+      return '';
+    });
+
+    try {
+      return JSON.parse(sanitized);
+    } catch {
+      // Attempt 2: Repair cut-off/truncated JSON string & braces
+      const fixed = fixTruncatedJSON(sanitized);
+      return JSON.parse(fixed);
     }
   }
-
-  if (end !== -1) {
-    return text.substring(start, end + 1);
-  }
-
-  return text.substring(start);
 }
 
 async function callGroqAPI(prompt: string, groqKey: string): Promise<string> {
   const groq = new Groq({ apiKey: groqKey });
-  const models = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.6-27b'];
+  const models = [
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
+    'qwen/qwen3.6-27b',
+    'groq/compound',
+    'groq/compound-mini',
+  ];
   let lastErr: any = null;
   for (const m of models) {
     try {
@@ -68,7 +115,7 @@ async function callGroqAPI(prompt: string, groqKey: string): Promise<string> {
       return response.choices[0]?.message?.content || '';
     } catch (err: any) {
       lastErr = err;
-      console.warn(`Groq model '${m}' failed, trying next...`);
+      console.warn(`Groq model '${m}' failed (${err?.message || err}). Trying next model...`);
     }
   }
   throw lastErr;
@@ -178,14 +225,16 @@ export async function generateRAGResumeContent(
   const systemInstruction = `
 You are a world-class RAG Resume & Portfolio Architect specializing in ATS-optimized, recruiter-ready resumes.
 
-CRITICAL RULES:
-- Every bullet point MUST start with a strong ACTION VERB (Architected, Engineered, Spearheaded, Optimized, Implemented, Developed, Led, Designed, Built, Deployed, Integrated, Automated, etc.)
-- Include QUANTIFIED METRICS wherever possible (percentages, numbers, dollar amounts, time savings)
-- Use industry-specific keywords for maximum ATS score
-- Keep professional summary to 2-3 impactful sentences
-- For technical skills, categorize into Languages, Frameworks & Libraries, and Developer Tools
-- For projects, include 2-3 bullet points per project describing technical achievements
-- Make the content specific, detailed, and achievement-oriented — NOT generic
+CRITICAL IDENTITY & CONTENT RULES:
+1. CANDIDATE IDENTITY IS MANDATORY: You MUST extract and preserve the candidate's ACTUAL full name, email address, phone number, location, education, work experience, projects, and skills from the ACCUMULATED USER CONTEXT (especially the "Uploaded Resume Context").
+2. DO NOT USE PLACEHOLDER OR RANDOM NAMES: NEVER invent fake names like "Full Name", "John Doe", "Jane Doe", "Alex Morgan", or hardcoded names. The candidate's real name MUST appear in the "name" field.
+3. Every bullet point MUST start with a strong ACTION VERB (Architected, Engineered, Spearheaded, Optimized, Implemented, Developed, Led, Designed, Built, Deployed, Integrated, Automated, etc.)
+4. Include QUANTIFIED METRICS wherever possible (percentages, numbers, dollar amounts, time savings)
+5. Use industry-specific keywords for maximum ATS score
+6. Keep professional summary to 2-3 impactful sentences
+7. For technical skills, categorize into Languages, Frameworks & Libraries, and Developer Tools
+8. For projects, include 2-3 bullet points per project describing technical achievements
+9. Make the content specific, detailed, and achievement-oriented — NOT generic
 
 USER INSTRUCTION: "${customPrompt}"
 
@@ -194,13 +243,13 @@ ACCUMULATED USER CONTEXT:
 ${contextChunks}
 """
 
-Return RAW JSON (no markdown fences, no explanation) matching this EXACT structure:
+Return RAW JSON (no markdown fences, no explanation) matching this EXACT structure (substitute actual candidate data into fields):
 {
-  "name": "Full Name",
-  "email": "email@domain.com",
-  "phone": "+91 XXXXXXXXXX",
-  "location": "City, State, Country",
-  "targetRole": "Target Job Title",
+  "name": "<Candidate's Real Full Name extracted from context>",
+  "email": "<Candidate's Email>",
+  "phone": "<Candidate's Phone>",
+  "location": "<City, State/Country>",
+  "targetRole": "<Target Role>",
   "summary": "2-3 sentence high-impact professional summary with quantified achievements",
   "linkedin": "linkedin.com/in/username",
   "github": "github.com/username",
@@ -215,9 +264,9 @@ Return RAW JSON (no markdown fences, no explanation) matching this EXACT structu
   "education": [
     {
       "institution": "University Name",
-      "degree": "B.Tech in Computer Science and Engineering — CGPA: X.XX/10.0",
-      "year": "Sept 2024 – Jun 2028",
-      "cgpa": "8.44",
+      "degree": "Degree Name — CGPA/GPA",
+      "year": "Start Year – End Year",
+      "cgpa": "X.XX",
       "location": "City, Country"
     }
   ],
@@ -227,7 +276,7 @@ Return RAW JSON (no markdown fences, no explanation) matching this EXACT structu
       "role": "Job Title",
       "duration": "Month Year – Month Year",
       "location": "Remote / City",
-      "certificate": "bit.ly/certificate-link",
+      "certificate": "certificate-link",
       "bulletPoints": ["Action verb + quantifiable impact sentence 1", "Action verb + technical accomplishment 2"]
     }
   ],
@@ -236,32 +285,31 @@ Return RAW JSON (no markdown fences, no explanation) matching this EXACT structu
       "title": "Project Name",
       "description": "One line overview",
       "techStack": ["Next.js", "TypeScript", "Tailwind CSS"],
-      "link": "bit.ly/project-link",
+      "link": "project-link",
       "bulletPoints": ["Built feature X achieving Y% improvement", "Integrated Z technology for A purpose"]
     }
   ],
   "achievements": [
-    "700+ Problems Solved: Demonstrated consistent problem-solving ability across LeetCode, CodeChef, and Code360",
-    "LeetCode: Solved 250+ Data Structures and Algorithms problems",
-    "Academics: 8.44 CGPA (B.Tech), 98% in Class X"
+    "Achievement metric 1",
+    "Achievement metric 2"
   ],
   "certifications": [
     {
-      "name": "AWS Certified Cloud Practitioner",
-      "issuer": "Amazon Web Services",
-      "link": "aws.amazon.com/verification",
-      "date": "Apr 2026"
+      "name": "Certification Name",
+      "issuer": "Issuer Name",
+      "link": "verification-link",
+      "date": "Month Year"
     }
   ],
   "activities": [
     {
-      "name": "CP Club — Competitive Programming Club",
-      "institution": "KIET Group of Institutions",
-      "duration": "Nov 2024 – Nov 2025",
-      "description": "Participated in coding contests and attended technical workshops"
+      "name": "Activity / Club Name",
+      "institution": "Organization / Institution",
+      "duration": "Duration",
+      "description": "Description of responsibilities and achievements"
     }
   ],
-  "hackathons": ["HackHazards (2025)", "Hackcelerate (2025)", "Hackzilla (2025)"]
+  "hackathons": ["Hackathon Name (Year)"]
 }
 `;
 
@@ -278,12 +326,18 @@ Return RAW JSON (no markdown fences, no explanation) matching this EXACT structu
       responseText = await callGroqAPI(systemInstruction, groqKey!);
     } else if (hasValidGemini) {
       const genAI = new GoogleGenerativeAI(geminiKey!);
-      const candidateModels = ['gemini-flash-latest', 'gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+      const candidateModels = ['gemini-3.6-flash', 'gemini-3.6-pro', 'gemini-3.5-flash', 'gemini-2.5-flash'];
       let lastError: any = null;
 
       for (const modelName of candidateModels) {
         try {
-          const model = genAI.getGenerativeModel({ model: modelName });
+          const model = genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig: {
+              maxOutputTokens: 8192,
+              responseMimeType: 'application/json',
+            },
+          });
           const result = await model.generateContent(systemInstruction);
           responseText = result.response.text();
           lastError = null;
@@ -292,7 +346,6 @@ Return RAW JSON (no markdown fences, no explanation) matching this EXACT structu
           lastError = err;
           const status = err?.status || err?.httpStatusCode;
           const msg = String(err?.message || '');
-          // Retry on ANY transient/model error: 404, 429, 500, 503, etc.
           const isRetryable = [404, 429, 500, 503].includes(status)
             || msg.includes('not found')
             || msg.includes('Service Unavailable')
@@ -303,7 +356,6 @@ Return RAW JSON (no markdown fences, no explanation) matching this EXACT structu
             console.warn(`Gemini model '${modelName}' failed (${status || 'unknown'}): ${msg.slice(0, 100)}. Trying next model...`);
             continue;
           }
-          // Only throw on truly unexpected errors (auth, invalid key, etc.)
           throw err;
         }
       }
@@ -323,8 +375,7 @@ Return RAW JSON (no markdown fences, no explanation) matching this EXACT structu
       return generateDefaultRAGProfile(userProfile, customPrompt);
     }
 
-    const cleanJsonText = extractFirstJSON(responseText);
-    const parsed = JSON.parse(cleanJsonText);
+    const parsed = repairAndParseJSON(responseText);
     return {
       ...userProfile,
       ...parsed,
@@ -335,23 +386,80 @@ Return RAW JSON (no markdown fences, no explanation) matching this EXACT structu
   }
 }
 
+export function extractIdentityFromResumeText(text?: string): {
+  name?: string;
+  email?: string;
+  phone?: string;
+  location?: string;
+} {
+  if (!text || !text.trim()) return {};
+
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  let email: string | undefined;
+  let phone: string | undefined;
+  let name: string | undefined;
+  let location: string | undefined;
+
+  // Extract email
+  const emailMatch = text.match(/[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}/);
+  if (emailMatch) email = emailMatch[0];
+
+  // Extract phone number
+  const phoneMatch = text.match(/(\+?\d{1,3}[\s-]?)?\(?\d{3}\)?[\s-]?\d{3}[\s-]?\d{4}/);
+  if (phoneMatch) phone = phoneMatch[0];
+
+  // Name extraction heuristic: look at top 10 lines for candidate name
+  for (const line of lines.slice(0, 10)) {
+    const cleanLine = line.replace(/[^\w\s]/g, '').trim();
+    const wordCount = cleanLine.split(/\s+/).length;
+    const lower = cleanLine.toLowerCase();
+
+    if (
+      wordCount >= 2 &&
+      wordCount <= 4 &&
+      !lower.includes('resume') &&
+      !lower.includes('curriculum') &&
+      !lower.includes('page') &&
+      !lower.includes('email') &&
+      !lower.includes('phone') &&
+      !lower.includes('contact') &&
+      !lower.includes('summary') &&
+      !lower.includes('experience') &&
+      !lower.includes('education') &&
+      !lower.includes('skills') &&
+      !lower.includes('http') &&
+      !lower.includes('github') &&
+      !lower.includes('linkedin') &&
+      !/\d/.test(cleanLine)
+    ) {
+      name = cleanLine;
+      break;
+    }
+  }
+
+  return { name, email, phone, location };
+}
+
 function generateDefaultRAGProfile(
   existing: UserContextProfile,
   prompt: string
 ): UserContextProfile {
+  const extracted = extractIdentityFromResumeText(existing.uploadedResumeText);
+
   return {
-    name: existing.name || 'Piyush Chaudhary',
-    email: existing.email || 'piyushch056@gmail.com',
-    phone: existing.phone || '+91 6396789234',
-    location: existing.location || 'Uttar Pradesh, India',
-    targetRole: existing.targetRole || 'Full Stack Developer',
-    linkedin: existing.linkedin || 'linkedin.com/in/develo-oper-piyush',
-    github: existing.github || 'github.com/develo-oper-piyush',
-    leetcode: existing.leetcode || 'leetcode.com/develo_oper_piyush',
-    portfolio: existing.portfolio || 'piyushchaudhary.vercel.app',
+    ...existing,
+    name: existing.name || extracted.name || 'Candidate Name',
+    email: existing.email || extracted.email || '',
+    phone: existing.phone || extracted.phone || '',
+    location: existing.location || extracted.location || '',
+    targetRole: existing.targetRole || 'Software Engineer',
+    linkedin: existing.linkedin || '',
+    github: existing.github || '',
+    leetcode: existing.leetcode || '',
+    portfolio: existing.portfolio || '',
     summary:
       existing.summary ||
-      'Full Stack Developer with expertise in building production-grade web applications using Next.js, TypeScript, and modern cloud infrastructure. Passionate about AI integration, competitive programming, and open-source contributions.',
+      'Software Engineer with experience developing robust web applications, optimizing performance, and building modern software solutions.',
     skills: existing.skills || [
       'JavaScript', 'TypeScript', 'HTML', 'CSS', 'SQL',
       'React', 'Next.js', 'Express.js', 'Node.js', 'Tailwind CSS', 'RESTful APIs',
@@ -364,87 +472,41 @@ function generateDefaultRAGProfile(
     },
     experiences: existing.experiences || [
       {
-        company: 'AICTE Virtual Internship',
-        role: 'ServiceNow System Administrator',
-        duration: 'March 2026 – Apr 2026',
+        company: 'Software Engineering Organization',
+        role: existing.targetRole || 'Software Developer',
+        duration: 'Jan 2024 – Present',
         location: 'Remote',
-        certificate: 'bit.ly/3TqMtG1',
         bulletPoints: [
-          'Completed a 1-month AICTE-certified virtual internship focused on ServiceNow platform administration, covering instance configuration, workflow automation, and IT service management fundamentals.',
+          'Developed and optimized full-stack features, improving system performance and overall user response times.',
+          'Collaborated with cross-functional teams to design RESTful API services and scalable database queries.',
         ],
       },
     ],
     projects: existing.projects || [
       {
-        title: 'Lumina Gen',
-        description: 'Full-stack AI image transformation app using Stability AI SD3 for style transfer across 6 presets.',
-        techStack: ['Next.js', 'TypeScript', 'Tailwind CSS', 'Stability AI SD3', 'Clerk', 'Neon PostgreSQL', 'ImageKit CDN'],
-        link: 'bit.ly/Lumina-Gen',
+        title: 'Full-Stack Web Platform',
+        description: 'Modern web application featuring secure user authentication, responsive UI, and API integration.',
+        techStack: ['Next.js', 'TypeScript', 'Tailwind CSS', 'PostgreSQL'],
         bulletPoints: [
-          'Built full-stack AI image transformation app using Stability AI SD3 for style transfer across 6 presets, with Clerk auth, Neon PostgreSQL, and ImageKit CDN for quota management and history tracking.',
-        ],
-      },
-      {
-        title: 'SwiftNotes 2.0',
-        description: 'Full-stack AI-powered note-taking platform integrating YouTube/video processing.',
-        techStack: ['Next.js', 'FastAPI', 'Supabase', 'Gemini AI', 'Python'],
-        link: 'bit.ly/Swift-notes',
-        bulletPoints: [
-          'Developed full-stack AI-powered note-taking platform integrating YouTube/video processing, a notebook editor, and AI-generated summaries into a unified student workspace.',
-        ],
-      },
-      {
-        title: 'Cloud Storage Platform',
-        description: 'Secure cloud storage application with JWT authentication.',
-        techStack: ['Node.js', 'Express', 'MongoDB', 'Supabase', 'Tailwind CSS'],
-        link: 'bit.ly/4fsxe71',
-        bulletPoints: [
-          'Engineered secure cloud storage application with JWT authentication, supporting file upload, download, rename, and deletion.',
+          'Architected responsive user interface and integrated backend APIs for seamless data handling.',
+          'Implemented secure authentication and optimized frontend state management.',
         ],
       },
     ],
     education: existing.education || [
       {
-        institution: 'KIET Group of Institutions',
-        degree: 'B.Tech in Computer Science and Engineering — CGPA: 8.23/10.0',
-        year: 'Sept 2024 – Jun 2028',
-        cgpa: '8.23',
-        location: 'Uttar Pradesh, India',
-      },
-      {
-        institution: 'BNG International School (CBSE)',
-        degree: 'Senior Secondary (Class XII) — 90%',
-        year: 'Apr 2022 – Jul 2023',
-        location: 'Uttar Pradesh, India',
+        institution: 'University / Institute of Technology',
+        degree: 'Bachelor of Technology / Bachelor of Science in Computer Science',
+        year: '2022 – 2026',
+        cgpa: '3.8/4.0',
+        location: 'City, Country',
       },
     ],
     achievements: existing.achievements || [
-      '700+ Problems Solved: Demonstrated consistent problem-solving ability across LeetCode, CodeChef, and Code360',
-      'LeetCode: Solved 250+ Data Structures and Algorithms problems, showcasing strong algorithmic proficiency',
-      'Academics: 8.44 CGPA (B.Tech), 98% in Class X and 90% in Class XII (CBSE Board)',
+      'Demonstrated consistent problem-solving capabilities across technical challenges and projects.',
     ],
-    certifications: existing.certifications || [
-      { name: 'AWS Certified Cloud Practitioner', issuer: 'Amazon Web Services', link: 'aws.amazon.com/verification', date: 'Apr 2026' },
-      { name: 'Next.js Development', issuer: 'GeeksforGeeks', link: 'bit.ly/4wbLGWM', date: 'May 2026' },
-      { name: 'React JS Development', issuer: 'GeeksforGeeks', link: 'bit.ly/4vGt8hA', date: 'Feb 2026' },
-      { name: 'ECMAScript ES6 JavaScript Tutorials', issuer: 'Infosys Springboard', link: 'bit.ly/4ysywaB', date: 'Mar 2026' },
-    ],
-    activities: existing.activities || [
-      {
-        name: 'CPByte — Competitive Programming Club',
-        institution: 'KIET Group of Institutions',
-        duration: 'Nov 2024 – Nov 2025',
-        description: 'Former Member — Participated in coding contests and attended technical workshops',
-      },
-      {
-        name: 'Innogeeks — Technical Innovation Society',
-        institution: 'KIET Group of Institutions',
-        duration: 'Nov 2024 – Nov 2025',
-        description: 'Former Member — Collaborated on technical projects and workshops on emerging technologies',
-      },
-    ],
-    hackathons: existing.hackathons || [
-      'HackHazards (2025)', 'Hackcelerate (2025)', 'Hackzilla (2025)', 'Other Hackathons',
-    ],
+    certifications: existing.certifications || [],
+    activities: existing.activities || [],
+    hackathons: existing.hackathons || [],
   };
 }

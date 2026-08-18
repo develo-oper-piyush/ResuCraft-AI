@@ -82,7 +82,7 @@ export function LatexResumeTemplate({ data, editable, onFieldChange }: LatexTemp
       {/* ═══════════ HEADER ═══════════ */}
       <header style={{ textAlign: "center", marginBottom: "6px" }}>
         <h1 style={{ fontFamily: font, fontSize: "22pt", fontWeight: 700, margin: 0, letterSpacing: "0.02em", color: "#000" }}>
-          <EditableText value={data.name || "Piyush Chaudhary"} path="name" />
+          <EditableText value={data.name || "Your Name"} path="name" />
         </h1>
 
         {/* Contact row */}

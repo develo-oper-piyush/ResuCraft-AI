@@ -16,10 +16,10 @@ export function ModernMinimalTemplate({ data }: TemplateProps) {
       {/* Header */}
       <header className="border-b-2 border-slate-900 pb-6 mb-6">
         <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-950 uppercase">
-          {data.name || "Alex Morgan"}
+          {data.name || "Your Name"}
         </h1>
         <p className="text-lg font-semibold text-cyan-700 tracking-wide mt-1">
-          {data.targetRole || "Senior Full Stack Engineer"}
+          {data.targetRole || "Software Engineer"}
         </p>
         <div className="flex flex-wrap items-center gap-4 text-xs sm:text-sm text-slate-600 mt-3 font-medium">
           {data.email && (
@@ -34,10 +34,12 @@ export function ModernMinimalTemplate({ data }: TemplateProps) {
               {data.phone}
             </span>
           )}
-          <span className="flex items-center gap-1.5">
-            <MapPin className="h-3.5 w-3.5 text-slate-500" />
-            San Francisco, CA
-          </span>
+          {data.location && (
+            <span className="flex items-center gap-1.5">
+              <MapPin className="h-3.5 w-3.5 text-slate-500" />
+              {data.location}
+            </span>
+          )}
         </div>
       </header>
 
