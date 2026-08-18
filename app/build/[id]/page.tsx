@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { Sparkles, ArrowLeft, Send, Download, Layout, FileType, RefreshCw, Eye, Edit3, Check, Loader2, Plus, Trash2, Wand2, Code, Palette, Target, Share2, Globe } from "lucide-react";
+import { Sparkles, ArrowLeft, Send, Download, Layout, FileType, RefreshCw, Eye, Edit3, Check, Loader2, Plus, Trash2, Wand2, Code, Palette, Target, Share2, Globe, Mic } from "lucide-react";
 import { UserContextProfile, extractIdentityFromResumeText } from "@/lib/ai/rag-chain";
 import { ModernMinimalTemplate, TechDeveloperTemplate, InteractivePortfolioTemplate, LatexResumeTemplate } from "@/components/ui/resume-templates";
 import { Button } from "@/components/ui/stateful-button";
@@ -11,6 +11,7 @@ import { SkeletonText } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
 import { ATSScoreMeter } from "@/components/ui/ats-score-meter";
 import { JDMatcherModal } from "@/components/ui/jd-matcher-modal";
+import { ElevatorPitchModal } from "@/components/ui/elevator-pitch-modal";
 
 export default function BuilderWorkspacePage() {
   const params = useParams();
@@ -45,8 +46,9 @@ export default function BuilderWorkspacePage() {
   const [isExporting, setIsExporting] = useState(false);
   const [activeTab, setActiveTab] = useState<"chat" | "form">("form");
 
-  // 🎯 JD Matcher & Live Shareable Public Link states
+  // 🎯 JD Matcher, Elevator Pitch & Live Shareable Public Link states
   const [isJDModalOpen, setIsJDModalOpen] = useState(false);
+  const [isPitchModalOpen, setIsPitchModalOpen] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
 
   const handleInjectKeyword = useCallback((keyword: string) => {
@@ -342,6 +344,14 @@ export default function BuilderWorkspacePage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* AI Elevator Pitch & STAR Stories Button */}
+          <button
+            onClick={() => setIsPitchModalOpen(true)}
+            className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-indigo-950/70 hover:bg-indigo-900/80 text-indigo-300 border border-indigo-500/40 transition-colors flex items-center gap-1"
+          >
+            <Mic className="h-3 w-3 text-indigo-400" /> Pitch & STAR Stories
+          </button>
+
           {/* JD Matcher & Tailor Button */}
           <button
             onClick={() => setIsJDModalOpen(true)}
@@ -726,6 +736,13 @@ export default function BuilderWorkspacePage() {
         onClose={() => setIsJDModalOpen(false)}
         profile={profile}
         onUpdateProfile={setProfile}
+      />
+
+      {/* 🎙️ AI Elevator Pitch & Recruiter Script Modal */}
+      <ElevatorPitchModal
+        isOpen={isPitchModalOpen}
+        onClose={() => setIsPitchModalOpen(false)}
+        profile={profile}
       />
     </div>
   );

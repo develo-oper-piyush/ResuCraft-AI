@@ -624,3 +624,135 @@ function generateHeuristicJDMatch(profile: UserContextProfile, jd: string): JDMa
     tailoredSuggestions: ['Incorporate missing keywords into experience bullet points and technical skills list.'],
   };
 }
+
+export interface StarAnswer {
+  question: string;
+  situation: string;
+  task: string;
+  action: string;
+  result: string;
+}
+
+export interface ElevatorPitchResult {
+  elevatorPitch: string;
+  tellMeAboutYourself: string;
+  starBehavioralAnswers: StarAnswer[];
+  keyTalkingPoints: string[];
+}
+
+export async function generateElevatorPitchWithAI(
+  profile: UserContextProfile
+): Promise<ElevatorPitchResult> {
+  const profileContext = JSON.stringify({
+    name: profile.name || "Candidate",
+    targetRole: profile.targetRole || "Software Engineer",
+    summary: profile.summary,
+    skills: profile.skills,
+    technicalSkills: profile.technicalSkills,
+    experiences: profile.experiences,
+    projects: profile.projects,
+  });
+
+  const prompt = `
+You are an executive interview coach and technical recruiter. Generate a powerful 60-second elevator pitch, a comprehensive "Tell Me About Yourself" intro script, 3 STAR-method behavioral interview answers based on the candidate's actual background, and key recruiter talking points.
+
+Candidate Context:
+"""
+${profileContext}
+"""
+
+Return RAW JSON with this exact structure:
+{
+  "elevatorPitch": "A punchy, confident 60-second spoken intro (approx 120-140 words) that introduces candidate name, target role, technical superpowers, and passion for building high-impact software.",
+  "tellMeAboutYourself": "A structured 2-minute narrative covering professional background, key technical milestones, major project highlight, and career objectives.",
+  "starBehavioralAnswers": [
+    {
+      "question": "Tell me about a complex technical challenge you solved.",
+      "situation": "Describe the context...",
+      "task": "Explain what needed to be accomplished...",
+      "action": "Detail the specific technical steps taken...",
+      "result": "Highlight the quantitative outcome or performance improvement..."
+    },
+    {
+      "question": "Describe a project where you demonstrated leadership and initiative.",
+      "situation": "Context...",
+      "task": "Task...",
+      "action": "Action...",
+      "result": "Result..."
+    },
+    {
+      "question": "How do you handle tight deadlines or technical debt?",
+      "situation": "Context...",
+      "task": "Task...",
+      "action": "Action...",
+      "result": "Result..."
+    }
+  ],
+  "keyTalkingPoints": [
+    "Highlight full-stack architecture skills",
+    "Emphasize quantified performance improvements",
+    "Mention problem-solving mindset and team collaboration"
+  ]
+}
+`;
+
+  const geminiKey = process.env.GEMINI_API_KEY;
+  const groqKey = process.env.GROQ_API_KEY;
+
+  try {
+    let raw = '';
+    if (groqKey && groqKey !== 'your_groq_api_key_here') {
+      raw = await callGroqAPI(prompt, groqKey);
+    } else if (geminiKey && geminiKey.length > 10) {
+      const genAI = new GoogleGenerativeAI(geminiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+      const res = await model.generateContent(prompt);
+      raw = res.response.text();
+    } else {
+      return generateHeuristicElevatorPitch(profile);
+    }
+
+    const parsed = repairAndParseJSON(raw);
+    return {
+      elevatorPitch: parsed.elevatorPitch || generateHeuristicElevatorPitch(profile).elevatorPitch,
+      tellMeAboutYourself: parsed.tellMeAboutYourself || generateHeuristicElevatorPitch(profile).tellMeAboutYourself,
+      starBehavioralAnswers: parsed.starBehavioralAnswers || generateHeuristicElevatorPitch(profile).starBehavioralAnswers,
+      keyTalkingPoints: parsed.keyTalkingPoints || generateHeuristicElevatorPitch(profile).keyTalkingPoints,
+    };
+  } catch (err) {
+    console.error('Elevator pitch AI error, falling back to heuristic:', err);
+    return generateHeuristicElevatorPitch(profile);
+  }
+}
+
+function generateHeuristicElevatorPitch(profile: UserContextProfile): ElevatorPitchResult {
+  const name = profile.name || "Software Developer";
+  const role = profile.targetRole || "Full Stack Software Engineer";
+  const firstProj = profile.projects?.[0]?.title || "Full-Stack Web Applications";
+
+  return {
+    elevatorPitch: `Hi, I'm ${name}, a ${role} with a strong foundation in modern web architecture, cloud APIs, and scalable software solutions. I specialize in building responsive frontend applications and robust backend systems using React, Next.js, TypeScript, and Node.js. Recently, I built ${firstProj}, where I optimized system performance and delivered seamless user experiences. I'm passionate about solving complex engineering problems and driving measurable business impact.`,
+    tellMeAboutYourself: `I've been building software solutions with a focus on web development, modern frontend frameworks, and cloud infrastructure. Over my career, I've developed key skills in TypeScript, Next.js, REST APIs, and database optimization. One of my proudest achievements was building ${firstProj}, where I architected end-to-end features and improved overall performance. I'm looking for a role as a ${role} where I can leverage my technical skills to build scalable applications.`,
+    starBehavioralAnswers: [
+      {
+        question: "Tell me about a complex technical challenge you solved.",
+        situation: `While working on ${firstProj}, we needed to handle high-frequency data transfers without degrading user interface performance.`,
+        task: "My objective was to optimize API payloads and state rendering cycles to achieve under 100ms response times.",
+        action: "I implemented efficient caching strategies, memoized expensive components, and refactored backend database queries.",
+        result: "This reduced total page load times by over 35% and improved overall application responsiveness.",
+      },
+      {
+        question: "Describe a project where you demonstrated technical initiative.",
+        situation: "The project required secure authentication and scalable state management for multi-user workflows.",
+        task: "I took ownership of designing a modular architecture that could scale seamlessly across features.",
+        action: "I integrated modern JWT/OAuth protocols, structured reusable component libraries, and set up automated API error boundaries.",
+        result: "The new architecture cut feature development time in half and ensured 99.9% uptime across user sessions.",
+      },
+    ],
+    keyTalkingPoints: [
+      `Extensive experience with ${role} technologies (Next.js, TypeScript, REST APIs).`,
+      "Proven track record of optimizing application load times and system latency.",
+      "Strong focus on clean, maintainable code standards and automated testing.",
+    ],
+  };
+}
