@@ -3,12 +3,14 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { Sparkles, ArrowLeft, Send, Download, Layout, FileType, RefreshCw, Eye, Edit3, Check, Loader2, Plus, Trash2, Wand2, Code, Palette } from "lucide-react";
+import { Sparkles, ArrowLeft, Send, Download, Layout, FileType, RefreshCw, Eye, Edit3, Check, Loader2, Plus, Trash2, Wand2, Code, Palette, Target, Share2, Globe } from "lucide-react";
 import { UserContextProfile, extractIdentityFromResumeText } from "@/lib/ai/rag-chain";
 import { ModernMinimalTemplate, TechDeveloperTemplate, InteractivePortfolioTemplate, LatexResumeTemplate } from "@/components/ui/resume-templates";
 import { Button } from "@/components/ui/stateful-button";
 import { SkeletonText } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
+import { ATSScoreMeter } from "@/components/ui/ats-score-meter";
+import { JDMatcherModal } from "@/components/ui/jd-matcher-modal";
 
 export default function BuilderWorkspacePage() {
   const params = useParams();
@@ -42,6 +44,35 @@ export default function BuilderWorkspacePage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [activeTab, setActiveTab] = useState<"chat" | "form">("form");
+
+  // 🎯 JD Matcher & Live Shareable Public Link states
+  const [isJDModalOpen, setIsJDModalOpen] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
+
+  const handleInjectKeyword = useCallback((keyword: string) => {
+    setProfile((prev) => {
+      const currentTools = prev.technicalSkills?.tools || [];
+      if (currentTools.includes(keyword)) return prev;
+      const updatedTools = [...currentTools, keyword];
+      const updatedSkills = Array.from(new Set([...(prev.skills || []), keyword]));
+      return {
+        ...prev,
+        skills: updatedSkills,
+        technicalSkills: {
+          ...prev.technicalSkills,
+          tools: updatedTools,
+        },
+      };
+    });
+  }, []);
+
+  const handleCopyPublicLink = () => {
+    const routeId = (params?.id as string) || "demo";
+    const shareableUrl = `${window.location.origin}/p/${routeId}`;
+    navigator.clipboard.writeText(shareableUrl);
+    setCopySuccess(true);
+    setTimeout(() => setCopySuccess(false), 2500);
+  };
 
 
 
@@ -311,10 +342,28 @@ export default function BuilderWorkspacePage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* JD Matcher & Tailor Button */}
+          <button
+            onClick={() => setIsJDModalOpen(true)}
+            className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition-colors flex items-center gap-1"
+          >
+            <Target className="h-3 w-3 text-cyan-400" /> Match & Tailor JD
+          </button>
+
+          {/* Share Public Portfolio Link Button */}
+          <button
+            onClick={handleCopyPublicLink}
+            className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-500/40 transition-all flex items-center gap-1"
+            title="Copy Public Hosted Web Portfolio Link"
+          >
+            {copySuccess ? <Check className="h-3 w-3 text-emerald-400" /> : <Globe className="h-3 w-3 text-cyan-400" />}
+            {copySuccess ? "Copied Link!" : "Share Link"}
+          </button>
+
           {/* Edit Mode Toggle */}
           <button
             onClick={() => setEditMode(!editMode)}
-            className={`text-[10px] font-semibold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 border ${
+            className={`text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 border ${
               editMode
                 ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
                 : "text-slate-400 hover:text-white border-slate-800"
@@ -437,6 +486,9 @@ export default function BuilderWorkspacePage() {
           ) : (
             /* ═══════════ COMPREHENSIVE FORM EDITOR ═══════════ */
             <div className="flex-1 p-4 overflow-y-auto space-y-3">
+              {/* ─── Real-Time Live ATS Score Gauge & Keyword Heatmap ─── */}
+              <ATSScoreMeter profile={profile} onInjectKeyword={handleInjectKeyword} />
+
               {/* ─── Personal Info ─── */}
               <p className={sectionTitleCls}>👤 Personal Information</p>
               <div className="grid grid-cols-2 gap-2">
@@ -667,6 +719,14 @@ export default function BuilderWorkspacePage() {
           </div>
         </div>
       </main>
+
+      {/* 🎯 AI Job Description (JD) Matcher & One-Click Tailor Modal */}
+      <JDMatcherModal
+        isOpen={isJDModalOpen}
+        onClose={() => setIsJDModalOpen(false)}
+        profile={profile}
+        onUpdateProfile={setProfile}
+      />
     </div>
   );
 }

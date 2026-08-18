@@ -18,7 +18,8 @@ import {
   X,
   FileCode,
   Maximize2,
-  Home
+  Home,
+  Globe
 } from "lucide-react";
 import { Button } from "@/components/ui/stateful-button";
 import { SkeletonCard } from "@/components/ui/skeleton";
@@ -283,15 +284,13 @@ export default function DashboardPage() {
                     )}
                   </div>
 
-                  <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between">
+                  <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
                     <Link href={`/build/${item.id}`} className="text-xs text-blue-400 hover:underline font-semibold flex items-center gap-1">
-                      Edit Layout <ArrowRight className="h-3.5 w-3.5" />
+                      Edit <ArrowRight className="h-3.5 w-3.5" />
                     </Link>
-                    {item.exportUrl && (
-                      <a href={item.exportUrl} target="_blank" rel="noreferrer" className="text-xs text-slate-400 hover:text-white flex items-center gap-1 font-semibold">
-                        PDF Export <Download className="h-3 w-3" />
-                      </a>
-                    )}
+                    <Link href={`/p/${item.id}`} target="_blank" className="text-xs text-cyan-400 hover:underline font-semibold flex items-center gap-1">
+                      <Globe className="h-3 w-3" /> Live Link
+                    </Link>
                   </div>
                 </div>
               ))}
