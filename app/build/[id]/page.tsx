@@ -2,16 +2,23 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useParams, useSearchParams } from "next/navigation";
 import { Sparkles, ArrowLeft, Send, Download, Layout, FileType, RefreshCw, Eye, Edit3, Check, Loader2, Plus, Trash2, Wand2, Code, Palette, Target, Share2, Globe, Mic } from "lucide-react";
 import { UserContextProfile, extractIdentityFromResumeText } from "@/lib/ai/rag-chain";
-import { ModernMinimalTemplate, TechDeveloperTemplate, InteractivePortfolioTemplate, LatexResumeTemplate } from "@/components/ui/resume-templates";
 import { Button } from "@/components/ui/stateful-button";
 import { SkeletonText } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
 import { ATSScoreMeter } from "@/components/ui/ats-score-meter";
 import { JDMatcherModal } from "@/components/ui/jd-matcher-modal";
 import { ElevatorPitchModal } from "@/components/ui/elevator-pitch-modal";
+import { toast } from "@/components/ui/toast";
+
+// ⚡ Dynamic Code Splitting for Templates
+const LatexResumeTemplate = dynamic(() => import("@/components/ui/resume-templates/latex-resume-template").then((m) => m.LatexResumeTemplate), { ssr: false });
+const ModernMinimalTemplate = dynamic(() => import("@/components/ui/resume-templates").then((m) => m.ModernMinimalTemplate), { ssr: false });
+const TechDeveloperTemplate = dynamic(() => import("@/components/ui/resume-templates").then((m) => m.TechDeveloperTemplate), { ssr: false });
+const InteractivePortfolioTemplate = dynamic(() => import("@/components/ui/resume-templates").then((m) => m.InteractivePortfolioTemplate), { ssr: false });
 
 export default function BuilderWorkspacePage() {
   const params = useParams();
@@ -57,6 +64,7 @@ export default function BuilderWorkspacePage() {
       if (currentTools.includes(keyword)) return prev;
       const updatedTools = [...currentTools, keyword];
       const updatedSkills = Array.from(new Set([...(prev.skills || []), keyword]));
+      toast.success(`Injected '${keyword}' into Technical Skills Matrix!`);
       return {
         ...prev,
         skills: updatedSkills,
@@ -73,6 +81,7 @@ export default function BuilderWorkspacePage() {
     const shareableUrl = `${window.location.origin}/p/${routeId}`;
     navigator.clipboard.writeText(shareableUrl);
     setCopySuccess(true);
+    toast.success("Public Link Copied!", shareableUrl);
     setTimeout(() => setCopySuccess(false), 2500);
   };
 

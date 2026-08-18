@@ -4,6 +4,7 @@ import { Inter } from "next/font/google";
 import { AuthSessionProvider } from "@/components/providers/session-provider";
 import { LenisProvider } from "@/components/providers/lenis-provider";
 import { SmoothCursor } from "@/components/ui/smooth-cursor";
+import { ToastProvider } from "@/components/ui/toast";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -33,8 +34,10 @@ export default function RootLayout({
       <body className={`${inter.className} bg-slate-950 text-slate-100 min-h-screen selection:bg-cyan-500/30 selection:text-cyan-200 overflow-x-hidden`}>
         <AuthSessionProvider>
           <LenisProvider>
-            <SmoothCursor />
-            {children}
+            <ToastProvider>
+              <SmoothCursor />
+              {children}
+            </ToastProvider>
           </LenisProvider>
         </AuthSessionProvider>
       </body>
